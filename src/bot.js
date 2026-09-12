@@ -298,6 +298,11 @@ bot.on('text', async (ctx) => {
     await handleQuizTypedAnswer(ctx, chatId, quiz, text);
     return;
   }
+  if (quiz && quiz.stage === 'buttons') {
+    // Don't drop their message — just remind them the buttons are still
+    // waiting, then let it continue on to normal conversation below.
+    await ctx.reply('Tap one of the buttons above to answer, or send /quiz again for a new word!');
+  }
 
   if (pendingWordfuelTopic.has(chatId)) {
     pendingWordfuelTopic.delete(chatId);
