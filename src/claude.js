@@ -113,3 +113,65 @@ export async function getConversationTurn({ history, userMessage, knownWords }) 
 
   return JSON.parse(firstText(response));
 }
+
+export async function explainSentence({ sentence }) {
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 512,
+    system: `You explain Korean sentences to a beginner-to-intermediate English-speaking learner.
+Given one Korean sentence, give a short, simple breakdown:
+- The meaning of each key word or particle (skip trivial ones if it keeps things clearer)
+- Any grammar points worth noting (particles, verb endings, etc.), explained in plain English
+Keep the whole explanation to a few short lines — not an essay. Get straight to the breakdown, don't repeat the sentence back at length first.`,
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: sentence }],
+  });
+
+  return firstText(response);
+}
+
+const topicVocabSchema = {
+  type: 'object',
+  properties: {
+    words: {
+      type: 'array',
+      description: 'Exactly 5 new Korean words or short phrases related to the given topic.',
+      minItems: 5,
+      maxItems: 5,
+      items: {
+        type: 'object',
+        properties: {
+          korean: { type: 'string' },
+          english: { type: 'string' },
+          example_sentence: {
+            type: 'string',
+            description: 'A natural Korean example sentence using the word.',
+          },
+        },
+        required: ['korean', 'english', 'example_sentence'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['words'],
+  additionalProperties: false,
+};
+
+export async function generateTopicVocab({ topic, knownWords }) {
+  const knownList = knownWords.length > 0 ? knownWords.join(', ') : '(none yet)';
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 1024,
+    system: `You help a beginner-to-intermediate English-speaking Korean learner build vocabulary on a specific topic.
+Given a topic, produce exactly 5 useful, everyday Korean words or short phrases related to it, each with an English meaning and a natural Korean example sentence.
+Do not include any word already in this learner's known-words list: ${knownList}`,
+    output_config: {
+      effort: 'low',
+      format: { type: 'json_schema', schema: topicVocabSchema },
+    },
+    messages: [{ role: 'user', content: `Topic: ${topic}` }],
+  });
+
+  return JSON.parse(firstText(response)).words;
+}

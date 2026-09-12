@@ -4,11 +4,11 @@ A Telegram bot that helps you practise Korean vocabulary through everyday
 conversation. Chats with you in Korean, corrects your mistakes, and saves
 new words it teaches you so you can review and quiz yourself later.
 
-This project is being built in stages. **Stage 2 (this stage): real
-conversation practice.** The bot now chats with you in Korean using Claude,
-gently corrects mistakes, and automatically saves any new vocab it teaches
-you to a local database. `/myvocab`, `/quiz`, and `/newtopic` commands are
-not built yet — that's Stages 3 and 4.
+This project is being built in stages. **Stage 3 (this stage): reviewing and
+practicing saved vocab.** On top of the Stage 2 conversation practice, you
+can now review your saved words, quiz yourself, get a sentence explained,
+and pull in a batch of new words on a topic of your choice. `/newtopic` is
+not built yet — that's Stage 4.
 
 ---
 
@@ -109,6 +109,50 @@ restarts.
 
 ---
 
+## New in Stage 3: reviewing and practicing your vocab
+
+- **`/myvocab`** — Lists every word you've been taught, split into "📗
+  Learnt" and "📖 Learning". A word moves to "Learnt" once you've answered
+  it correctly in `/quiz` three times.
+
+- **`/quiz`** — Picks one of your saved words (favoring ones you're still
+  learning) and asks you to type the Korean for it.
+  - Get it right → congratulations, and it counts toward that word's
+    3-correct mastery.
+  - Get it wrong → instead of showing you the answer, it gives you 4
+    multiple-choice buttons to pick from. Get the multiple-choice right and
+    it still counts toward mastery; get it wrong and it reveals the answer.
+
+- **`/explain`** — Breaks down the bot's most recent Korean message into
+  plain English: what each word/particle means and any grammar points.
+  Handy right after the bot says something that didn't quite land.
+
+- **`/wordfuel <topic>`** — e.g. `/wordfuel travel` — asks Claude for 5 new
+  words on that topic and saves them straight to your vocab list. If you
+  just send `/wordfuel` with no topic, it'll ask you for one.
+
+### What to test for Stage 3
+
+1. Chat with the bot a little first (or run `/wordfuel travel` and similar)
+   so you have a few saved words.
+2. `/myvocab` — check the words show up under "📖 Learning" with the right
+   English meanings.
+3. `/quiz` — answer once correctly by typing the Korean word; you should get
+   a congratulations message. Run `/quiz` again and this time type something
+   wrong on purpose — you should get 4 buttons instead of the answer. Tap
+   the correct one and confirm it still counts as correct; try it again and
+   tap a wrong one to confirm it reveals the right answer instead.
+4. Quiz the same word correctly 3 times total (mix of typed and
+   button answers is fine) and confirm `/myvocab` now shows it under "📗
+   Learnt".
+5. `/explain` — right after the bot sends you a Korean message, run
+   `/explain` and check you get a short, clear breakdown.
+6. `/wordfuel travel` — check you get exactly 5 new words saved, and that
+   running it again with the same topic doesn't repeat words you already
+   have.
+
+---
+
 ## ⚠️ If the bot goes silent (very important)
 
 Telegram bots only allow **one running copy at a time**. If you accidentally
@@ -138,8 +182,7 @@ If your bot stops responding, before doing anything else:
 - ✅ **Stage 1** — Basic bot connects to Telegram, responds to `/start`.
 - ✅ **Stage 2** — Bot chats in Korean, corrects mistakes, saves new vocab
   to a local database automatically.
-- ⬜ **Stage 3** — `/myvocab` (review saved words) and `/quiz` (test
-  yourself) commands.
+- ✅ **Stage 3** — `/myvocab`, `/quiz`, `/explain`, and `/wordfuel` commands.
 - ⬜ **Stage 4** — `/newtopic` command and more conversation variety.
 
 We pause after each stage so you can test it before moving to the next one.

@@ -26,6 +26,18 @@ const insertVocabStmt = db.prepare(`
 `);
 
 const allKoreanWordsStmt = db.prepare('SELECT korean FROM vocab');
+const allVocabStmt = db.prepare('SELECT * FROM vocab ORDER BY date_added DESC');
+const randomLearningWordStmt = db.prepare(
+  "SELECT * FROM vocab WHERE status = 'Learning' ORDER BY RANDOM() LIMIT 1"
+);
+const randomAnyWordStmt = db.prepare('SELECT * FROM vocab ORDER BY RANDOM() LIMIT 1');
+const randomDistractorsStmt = db.prepare(
+  'SELECT * FROM vocab WHERE id != ? ORDER BY RANDOM() LIMIT ?'
+);
+const getVocabByIdStmt = db.prepare('SELECT * FROM vocab WHERE id = ?');
+const updateAfterCorrectAnswerStmt = db.prepare(
+  'UPDATE vocab SET correct_count = ?, status = ? WHERE id = ?'
+);
 
 // Returns true if the word was newly saved, false if it was already known.
 export function saveVocabWord({ korean, english, example_sentence }) {
@@ -40,4 +52,32 @@ export function saveVocabWord({ korean, english, example_sentence }) {
 
 export function getAllKoreanWords() {
   return allKoreanWordsStmt.all().map((row) => row.korean);
+}
+
+export function getAllVocab() {
+  return allVocabStmt.all();
+}
+
+// Prefers a word still being learned; falls back to any word if none are
+// left in "Learning" status. Returns undefined if the vocab list is empty.
+export function getRandomVocabWord() {
+  return randomLearningWordStmt.get() ?? randomAnyWordStmt.get();
+}
+
+export function getRandomDistractors({ excludeId, limit }) {
+  return randomDistractorsStmt.all(excludeId, limit);
+}
+
+// Increments a word's correct-answer count and promotes it to "Learnt" once
+// it reaches 3 correct answers. Returns the updated row, or null if the
+// word no longer exists.
+export function recordCorrectAnswer(id) {
+  const word = getVocabByIdStmt.get(id);
+  if (!word) {
+    return null;
+  }
+  const correct_count = word.correct_count + 1;
+  const status = correct_count >= 3 ? 'Learnt' : word.status;
+  updateAfterCorrectAnswerStmt.run(correct_count, status, id);
+  return { ...word, correct_count, status };
 }

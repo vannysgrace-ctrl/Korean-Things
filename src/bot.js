@@ -1,8 +1,15 @@
 import https from 'node:https';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import dotenv from 'dotenv';
-import { getConversationTurn, STARTER_MESSAGE } from './claude.js';
-import { saveVocabWord, getAllKoreanWords } from './db.js';
+import { getConversationTurn, explainSentence, generateTopicVocab, STARTER_MESSAGE } from './claude.js';
+import {
+  saveVocabWord,
+  getAllKoreanWords,
+  getAllVocab,
+  getRandomVocabWord,
+  getRandomDistractors,
+  recordCorrectAnswer,
+} from './db.js';
 
 dotenv.config();
 
@@ -24,6 +31,24 @@ if (!process.env.ANTHROPIC_API_KEY) {
 // whenever the bot restarts (e.g. on every code save, since we run it with
 // `node --watch`). Vocab is saved to the database, so that part persists.
 const conversations = new Map();
+
+// Pending /quiz state per chat: { stage: 'typed' | 'buttons', wordId, korean,
+// english, options? }. 'options' (the shuffled multiple-choice list) is only
+// present once the quiz has moved to the 'buttons' stage.
+const pendingQuiz = new Map();
+
+// Chats waiting to send a topic for /wordfuel after running it with no
+// topic attached.
+const pendingWordfuelTopic = new Set();
+
+function shuffle(items) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 // Force IPv4 for the Telegram connection — reduces ECONNRESET errors on
 // unstable connections like a phone hotspot.
@@ -87,13 +112,200 @@ async function sendConversationTurn(ctx, chatId, userMessage) {
   await ctx.reply(outgoing);
 }
 
+async function congratulateAndRecord(ctx, chatId, wordId) {
+  const updated = recordCorrectAnswer(wordId);
+  pendingQuiz.delete(chatId);
+
+  let message = `🎉 Correct! "${updated.korean}" means "${updated.english}".`;
+  if (updated.status === 'Learnt' && updated.correct_count === 3) {
+    message += '\n\n🏆 Nice work — this word is now marked as "Learnt"!';
+  }
+  await ctx.reply(message);
+}
+
+async function handleQuizTypedAnswer(ctx, chatId, quiz, text) {
+  if (text.trim() === quiz.korean.trim()) {
+    await congratulateAndRecord(ctx, chatId, quiz.wordId);
+    return;
+  }
+
+  // Wrong on the first try — don't reveal the answer, offer multiple choice.
+  const distractors = getRandomDistractors({ excludeId: quiz.wordId, limit: 3 });
+  const options = shuffle([
+    { korean: quiz.korean, english: quiz.english },
+    ...distractors.map((d) => ({ korean: d.korean, english: d.english })),
+  ]);
+
+  pendingQuiz.set(chatId, { ...quiz, stage: 'buttons', options });
+
+  const buttons = options.map((opt, i) => Markup.button.callback(opt.korean, `quiz_choice:${i}`));
+  await ctx.reply(
+    "Not quite — here's a hint. Pick the right one:",
+    Markup.inlineKeyboard(buttons, { columns: 2 })
+  );
+}
+
+async function runWordfuel(ctx, topic) {
+  await ctx.sendChatAction('typing');
+
+  let words;
+  try {
+    words = await generateTopicVocab({ topic, knownWords: getAllKoreanWords() });
+  } catch (err) {
+    console.error('Claude API error (wordfuel):', err);
+    await ctx.reply('Sorry, I had trouble reaching Claude just now. Please try /wordfuel again.');
+    return;
+  }
+
+  const savedWords = words.filter((v) =>
+    saveVocabWord({
+      korean: v.korean,
+      english: v.english,
+      example_sentence: v.example_sentence,
+    })
+  );
+
+  if (savedWords.length === 0) {
+    await ctx.reply(
+      `Hmm, I couldn't come up with any new words for "${topic}" that you don't already know. Try another topic!`
+    );
+    return;
+  }
+
+  let outgoing = `📚 New word${savedWords.length > 1 ? 's' : ''} saved to your vocab list (topic: ${topic}):`;
+  for (const v of savedWords) {
+    outgoing += `\n• ${v.korean} — ${v.english}\n   e.g. ${v.example_sentence}`;
+  }
+  await ctx.reply(outgoing);
+}
+
 bot.start(async (ctx) => {
   conversations.delete(ctx.chat.id);
   await sendConversationTurn(ctx, ctx.chat.id, STARTER_MESSAGE);
 });
 
+bot.command('myvocab', async (ctx) => {
+  const allVocab = getAllVocab();
+  const learnt = allVocab.filter((w) => w.status === 'Learnt');
+  const learning = allVocab.filter((w) => w.status === 'Learning');
+  const formatList = (words) => words.map((w) => `${w.korean} — ${w.english}`).join('\n');
+  const emptyNote = 'Nothing here yet — keep chatting or try /wordfuel!';
+
+  const message =
+    `📗 Learnt:\n${learnt.length > 0 ? formatList(learnt) : emptyNote}\n\n` +
+    `📖 Learning:\n${learning.length > 0 ? formatList(learning) : emptyNote}`;
+
+  await ctx.reply(message);
+});
+
+bot.command('quiz', async (ctx) => {
+  const chatId = ctx.chat.id;
+  const word = getRandomVocabWord();
+
+  if (!word) {
+    await ctx.reply(
+      "You don't have any saved vocab yet — chat with me a bit or try /wordfuel <topic> to add some!"
+    );
+    return;
+  }
+
+  pendingQuiz.set(chatId, {
+    stage: 'typed',
+    wordId: word.id,
+    korean: word.korean,
+    english: word.english,
+  });
+
+  await ctx.reply(`❓ How do you say "${word.english}" in Korean?`);
+});
+
+bot.command('explain', async (ctx) => {
+  const chatId = ctx.chat.id;
+  const history = conversations.get(chatId) ?? [];
+  const lastBotMessage = [...history].reverse().find((m) => m.role === 'assistant');
+
+  if (!lastBotMessage) {
+    await ctx.reply(
+      "I haven't said anything in Korean yet — send /start or chat with me a bit first!"
+    );
+    return;
+  }
+
+  await ctx.sendChatAction('typing');
+  try {
+    const explanation = await explainSentence({ sentence: lastBotMessage.content });
+    await ctx.reply(explanation);
+  } catch (err) {
+    console.error('Claude API error (explain):', err);
+    await ctx.reply('Sorry, I had trouble reaching Claude just now. Please try /explain again.');
+  }
+});
+
+bot.command('wordfuel', async (ctx) => {
+  const topic = ctx.payload.trim();
+
+  if (!topic) {
+    pendingWordfuelTopic.add(ctx.chat.id);
+    await ctx.reply('Sure — what topic would you like new words for? (e.g. "travel")');
+    return;
+  }
+
+  await runWordfuel(ctx, topic);
+});
+
+bot.on('callback_query', async (ctx) => {
+  const data = ctx.callbackQuery.data;
+  if (!data || !data.startsWith('quiz_choice:')) {
+    await ctx.answerCbQuery();
+    return;
+  }
+
+  const chatId = ctx.chat.id;
+  const quiz = pendingQuiz.get(chatId);
+  if (!quiz || quiz.stage !== 'buttons') {
+    await ctx.answerCbQuery('This quiz has expired — try /quiz again.');
+    return;
+  }
+
+  const selected = quiz.options[Number(data.split(':')[1])];
+  await ctx.answerCbQuery();
+  if (!selected) {
+    return;
+  }
+
+  pendingQuiz.delete(chatId);
+
+  try {
+    await ctx.editMessageReplyMarkup(undefined);
+  } catch {
+    // Message may already be edited or gone — safe to ignore.
+  }
+
+  if (selected.korean === quiz.korean) {
+    // congratulateAndRecord also deletes pendingQuiz — harmless, already gone.
+    await congratulateAndRecord(ctx, chatId, quiz.wordId);
+  } else {
+    await ctx.reply(`❌ Not quite. The correct answer was "${quiz.korean}" (${quiz.english}).`);
+  }
+});
+
 bot.on('text', async (ctx) => {
-  await sendConversationTurn(ctx, ctx.chat.id, ctx.message.text);
+  const chatId = ctx.chat.id;
+  const text = ctx.message.text;
+
+  const quiz = pendingQuiz.get(chatId);
+  if (quiz && quiz.stage === 'typed') {
+    await handleQuizTypedAnswer(ctx, chatId, quiz, text);
+    return;
+  }
+
+  if (pendingWordfuelTopic.has(chatId)) {
+    pendingWordfuelTopic.delete(chatId);
+    await runWordfuel(ctx, text.trim());
+    return;
+  }
+
+  await sendConversationTurn(ctx, chatId, text);
 });
 
 bot.catch((err, ctx) => {
