@@ -219,22 +219,47 @@ bot.command('quiz', async (ctx) => {
   await ctx.reply(`❓ How do you say "${word.english}" in Korean?`);
 });
 
+function formatExplanation(sentence, data) {
+  if (data.mistake) {
+    return (
+      `${sentence}\n(${data.translation})\n\n` +
+      `${data.mistake.why_wrong}\n\n` +
+      `${data.mistake.corrected}`
+    );
+  }
+
+  const breakdownLines = data.breakdown.map((b) => `${b.phrase} — ${b.meaning}`).join('\n');
+  return `${sentence}\n${data.translation}\n\n${breakdownLines}`;
+}
+
 bot.command('explain', async (ctx) => {
   const chatId = ctx.chat.id;
-  const history = conversations.get(chatId) ?? [];
-  const lastBotMessage = [...history].reverse().find((m) => m.role === 'assistant');
+  const providedSentence = ctx.payload.trim();
 
-  if (!lastBotMessage) {
-    await ctx.reply(
-      "I haven't said anything in Korean yet — send /start or chat with me a bit first!"
-    );
-    return;
+  let sentence;
+  let checkForMistakes;
+
+  if (providedSentence) {
+    sentence = providedSentence;
+    checkForMistakes = true;
+  } else {
+    const history = conversations.get(chatId) ?? [];
+    const lastBotMessage = [...history].reverse().find((m) => m.role === 'assistant');
+    if (!lastBotMessage) {
+      await ctx.reply(
+        "I haven't said anything in Korean yet — send /start or chat with me a bit first, " +
+          'or use /explain <a Korean sentence>.'
+      );
+      return;
+    }
+    sentence = lastBotMessage.content;
+    checkForMistakes = false;
   }
 
   await ctx.sendChatAction('typing');
   try {
-    const explanation = await explainSentence({ sentence: lastBotMessage.content });
-    await ctx.reply(explanation);
+    const data = await explainSentence({ sentence, checkForMistakes });
+    await ctx.reply(formatExplanation(sentence, data));
   } catch (err) {
     console.error('Claude API error (explain):', err);
     await ctx.reply('Sorry, I had trouble reaching Claude just now. Please try /explain again.');

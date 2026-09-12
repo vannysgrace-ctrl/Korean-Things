@@ -123,9 +123,14 @@ restarts.
     multiple-choice buttons to pick from. Get the multiple-choice right and
     it still counts toward mastery; get it wrong and it reveals the answer.
 
-- **`/explain`** — Breaks down the bot's most recent Korean message into
-  plain English: what each word/particle means and any grammar points.
-  Handy right after the bot says something that didn't quite land.
+- **`/explain`** — Breaks down a Korean sentence into plain English: a
+  translation, plus what each word/particle means and any grammar points.
+  - Send it with no text (`/explain`) and it explains the bot's most recent
+    Korean message.
+  - Send it with a sentence attached (e.g. `/explain 지금 주문해도 될까요?`)
+    and it explains *that* sentence instead — and since that's your own
+    Korean, it'll also flag it if something's off, showing the corrected
+    version.
 
 - **`/wordfuel <topic>`** — e.g. `/wordfuel travel` — asks Claude for 5 new
   words on that topic and saves them straight to your vocab list. If you
@@ -146,7 +151,12 @@ restarts.
    button answers is fine) and confirm `/myvocab` now shows it under "📗
    Learnt".
 5. `/explain` — right after the bot sends you a Korean message, run
-   `/explain` and check you get a short, clear breakdown.
+   `/explain` (no text after it) and check you get a translation plus a
+   short, clear word-by-word breakdown. Then try `/explain <a Korean
+   sentence you write yourself>` — with a correct sentence you should get
+   the same translation + breakdown format; with a sentence that has a
+   mistake, you should get the mistake explained and a corrected version
+   instead of the breakdown.
 6. `/wordfuel travel` — check you get exactly 5 new words saved, and that
    running it again with the same topic doesn't repeat words you already
    have.

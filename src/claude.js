@@ -114,20 +114,94 @@ export async function getConversationTurn({ history, userMessage, knownWords }) 
   return JSON.parse(firstText(response));
 }
 
-export async function explainSentence({ sentence }) {
+const explainBreakdownItemSchema = {
+  type: 'object',
+  properties: {
+    phrase: {
+      type: 'string',
+      description: 'A word, particle, or verb ending from the sentence, in the order it appears.',
+    },
+    meaning: {
+      type: 'string',
+      description:
+        'Its meaning. For a particle or verb ending, give a short grammar note instead ' +
+        '(e.g. "해도 될까요" -> "polite way to ask permission").',
+    },
+  },
+  required: ['phrase', 'meaning'],
+  additionalProperties: false,
+};
+
+const mistakeSchema = {
+  description:
+    'Null if the sentence is grammatically fine and natural. Otherwise, an explanation ' +
+    'of the mistake and the corrected sentence.',
+  anyOf: [
+    { type: 'null' },
+    {
+      type: 'object',
+      properties: {
+        why_wrong: {
+          type: 'string',
+          description: 'A short, simple English explanation of what was wrong.',
+        },
+        corrected: { type: 'string', description: 'The corrected Korean sentence.' },
+      },
+      required: ['why_wrong', 'corrected'],
+      additionalProperties: false,
+    },
+  ],
+};
+
+function buildExplainSchema(checkForMistakes) {
+  const properties = {
+    translation: {
+      type: 'string',
+      description: 'The plain English meaning of the whole sentence.',
+    },
+    breakdown: {
+      type: 'array',
+      description: 'Ordered word-by-word or particle-by-particle breakdown of the sentence.',
+      items: explainBreakdownItemSchema,
+    },
+  };
+  const required = ['translation', 'breakdown'];
+
+  if (checkForMistakes) {
+    properties.mistake = mistakeSchema;
+    required.push('mistake');
+  }
+
+  return { type: 'object', properties, required, additionalProperties: false };
+}
+
+// checkForMistakes should only be true for a sentence the learner wrote
+// themselves — the bot's own messages are assumed correct, so we don't
+// even ask the model to check them (saves a wasted check).
+export async function explainSentence({ sentence, checkForMistakes = false }) {
+  const system = checkForMistakes
+    ? `You help a beginner-to-intermediate English-speaking Korean learner understand a Korean sentence they wrote themselves.
+Give the plain English translation, then an ordered word-by-word or particle-by-particle breakdown (for a particle or verb ending, give a short grammar note instead of a literal meaning).
+Also check whether the sentence has a grammar or word-choice mistake. If it reads naturally, set "mistake" to null. If there's a mistake, explain what's wrong in short, simple English and give the corrected sentence.`
+    : `You help a beginner-to-intermediate English-speaking Korean learner understand a Korean sentence.
+Give the plain English translation, then an ordered word-by-word or particle-by-particle breakdown (for a particle or verb ending, give a short grammar note instead of a literal meaning). Keep it short and simple.`;
+
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 512,
-    system: `You explain Korean sentences to a beginner-to-intermediate English-speaking learner.
-Given one Korean sentence, give a short, simple breakdown:
-- The meaning of each key word or particle (skip trivial ones if it keeps things clearer)
-- Any grammar points worth noting (particles, verb endings, etc.), explained in plain English
-Keep the whole explanation to a few short lines — not an essay. Get straight to the breakdown, don't repeat the sentence back at length first.`,
-    output_config: { effort: 'low' },
+    system,
+    output_config: {
+      effort: 'low',
+      format: { type: 'json_schema', schema: buildExplainSchema(checkForMistakes) },
+    },
     messages: [{ role: 'user', content: sentence }],
   });
 
-  return firstText(response);
+  const data = JSON.parse(firstText(response));
+  if (!checkForMistakes) {
+    data.mistake = null;
+  }
+  return data;
 }
 
 const topicVocabSchema = {
