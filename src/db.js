@@ -3,7 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, '..', 'vocab.db'));
+
+// DB_PATH lets a deployment point the database file at persistent storage
+// (e.g. a Railway Volume) instead of the container's ephemeral filesystem.
+// Falls back to the old relative path so local development needs no setup.
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'vocab.db');
+const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
 
