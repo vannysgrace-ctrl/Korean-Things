@@ -135,9 +135,9 @@ const topicVocabSchema = {
   properties: {
     words: {
       type: 'array',
-      description: 'Exactly 5 new Korean words or short phrases related to the given topic.',
-      minItems: 5,
-      maxItems: 5,
+      description:
+        'New Korean words or short phrases related to the given topic. Always return ' +
+        'exactly 5 items — no fewer, no more.',
       items: {
         type: 'object',
         properties: {
@@ -173,5 +173,10 @@ Do not include any word already in this learner's known-words list: ${knownList}
     messages: [{ role: 'user', content: `Topic: ${topic}` }],
   });
 
-  return JSON.parse(firstText(response)).words;
+  const words = JSON.parse(firstText(response)).words;
+
+  // The schema can no longer enforce "exactly 5" (the API only supports
+  // minItems/maxItems of 0 or 1), so trim defensively if the model returns
+  // a slightly different count rather than breaking /wordfuel over it.
+  return words.slice(0, 5);
 }
